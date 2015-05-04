@@ -55,8 +55,29 @@ func plan9Syntax(inst Inst, pc uint64, symname func(uint64) (string, uint64)) st
 		STQ,
 		STHBRX, STWBRX:
 		return op + " " + strings.Join(args, ", ")
-	// BC instructions needs additional handling
+	// branch instructions needs additional handling
+	case BCLR:
+		if int(inst.Args[0].(Imm))&20 == 20 { // unconditional
+			return "RET"
+		}
+		return op + " " + strings.Join(args, ", ")
 	case BC:
+		if int(inst.Args[0].(Imm))&0x1c == 12 { // jump on cond bit set
+			return fmt.Sprintf("B%s %s", args[1], args[2])
+		} else if int(inst.Args[0].(Imm))&0x1c == 4 && revCondMap[args[1]] != "" { // jump on cond bit not set
+			return fmt.Sprintf("B%s %s", revCondMap[args[1]], args[2])
+		}
+	case BCCTR:
+		if int(inst.Args[0].(Imm))&20 == 20 { // unconditional
+			return "BR (CTR)"
+		}
+		return op + " " + strings.Join(args, ", ")
+	case BCCTRL:
+		if int(inst.Args[0].(Imm))&20 == 20 { // unconditional
+			return "BL (CTR)"
+		}
+		return op + " " + strings.Join(args, ", ")
+	case BCA, BCL, BCLA, BCLRL, BCTAR, BCTARL:
 		return op + " " + strings.Join(args, ", ")
 	}
 	panic("unreachable")
@@ -98,6 +119,8 @@ func plan9Arg(inst *Inst, argIndex int, pc uint64, arg Arg, symname func(uint64)
 		switch arg {
 		case 8:
 			return "LR"
+		case 9:
+			return "CTR"
 		}
 		return fmt.Sprintf("SPR(%d)", int(arg))
 	case PCRel:
@@ -119,6 +142,12 @@ func plan9Arg(inst *Inst, argIndex int, pc uint64, arg Arg, symname func(uint64)
 	return fmt.Sprintf("???(%v)", arg)
 }
 
+// revCondMap maps a conditional register bit to its inverse, if possible.
+var revCondMap = map[string]string{
+	"LT": "GE", "GT": "LE", "EQ": "NE",
+}
+
+// plan9OpMap maps an Op to its Plan 9 mnemonics, if different than its GNU mnemonics.
 var plan9OpMap = map[Op]string{
 	LBZ: "MOVBZ", STB: "MOVB",
 	LBZU: "MOVBZU", STBU: "MOVBU", // TODO(minux): indexed forms are not handled
