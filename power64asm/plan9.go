@@ -9,18 +9,14 @@ import (
 	"strings"
 )
 
-// symNameFunc is provided to plan9Syntax that queries the symbol table for
-// a given address. It returns the name and base address of the symbol
-// containing the target, if any; otherwise it returns "", 0.
-type symnameFunc func(uint64) (string, uint64)
-
 // plan9Syntax returns the Go assembler syntax for the instruction.
 // The syntax was originally defined by Plan 9.
 // The pc is the program counter of the first instruction, used for expanding
 // PC-relative addresses into absolute ones.
 // The symname function queries the symbol table for the program
-// being disassembled.
-func Plan9Syntax(inst Inst, pc uint64, symname symnameFunc) string { // unexport
+// being disassembled. It returns the name and base address of the symbol
+// containing the target, if any; otherwise it returns "", 0.
+func plan9Syntax(inst Inst, pc uint64, symname func(uint64) (string, uint64)) string {
 	if symname == nil {
 		symname = func(uint64) (string, uint64) { return "", 0 }
 	}
@@ -32,7 +28,9 @@ func Plan9Syntax(inst Inst, pc uint64, symname symnameFunc) string { // unexport
 		if a == nil {
 			break
 		}
-		args = append(args, plan9Arg(&inst, i, pc, a, symname))
+		if s := plan9Arg(&inst, i, pc, a, symname); s != "" {
+			args = append(args, s)
+		}
 	}
 	var op string
 	op = plan9OpMap[inst.Op]
@@ -57,14 +55,17 @@ func Plan9Syntax(inst Inst, pc uint64, symname symnameFunc) string { // unexport
 		STQ,
 		STHBRX, STWBRX:
 		return op + " " + strings.Join(args, ", ")
+	// BC instructions needs additional handling
+	case BC:
+		return op + " " + strings.Join(args, ", ")
 	}
-	return "?" // unreachable
+	panic("unreachable")
 }
 
 // plan9Arg formats arg (which is the argIndex's arg in inst) according to Plan 9 rules.
 // NOTE: because Plan9Syntax is the only caller of this func, and it receives a copy
 //       of inst, it's ok to modify inst.Args here.
-func plan9Arg(inst *Inst, argIndex int, pc uint64, arg Arg, symname symnameFunc) string {
+func plan9Arg(inst *Inst, argIndex int, pc uint64, arg Arg, symname func(uint64) (string, uint64)) string {
 	// special cases for load/store instructions
 	if _, ok := arg.(Offset); ok {
 		if argIndex+1 == len(inst.Args) || inst.Args[argIndex+1] == nil {
@@ -92,15 +93,17 @@ func plan9Arg(inst *Inst, argIndex int, pc uint64, arg Arg, symname symnameFunc)
 		}
 		return fmt.Sprintf("4*CR%d+%s", int(arg-Cond0LT)/4, bit)
 	case Imm:
-		return fmt.Sprintf("%d", arg)
+		return fmt.Sprintf("$%d", arg)
 	case SpReg:
-		return fmt.Sprintf("%d", int(arg))
+		switch arg {
+		case 8:
+			return "LR"
+		}
+		return fmt.Sprintf("SPR(%d)", int(arg))
 	case PCRel:
 		addr := pc + uint64(int64(arg))
 		if s, base := symname(addr); s != "" && base == addr {
 			return fmt.Sprintf("%s(SB)", s)
-		} else if s != "" {
-			return fmt.Sprintf("%s%+d(SB)", s, int64(addr-base))
 		}
 		return fmt.Sprintf("%#x", addr)
 	case Label:
@@ -125,5 +128,8 @@ var plan9OpMap = map[Op]string{
 	LWZU: "MOVWZU", STWU: "MOVWU",
 	LD: "MOVD", STD: "MOVD",
 	LDU: "MOVDU", STDU: "MOVDU",
-	B: "BR",
+	MTSPR: "MOV", MFSPR: "MOV", // the width is ambiguous for SPRs
+	B:     "BR",
+	CMPLD: "CMPU", CMPLW: "CMPWU",
+	CMPD: "CMP", CMPW: "CMPW",
 }
