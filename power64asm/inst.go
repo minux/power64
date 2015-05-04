@@ -13,7 +13,7 @@ type Inst struct {
 	Op   Op     // Opcode mnemonic
 	Enc  uint32 // Raw encoding bits
 	Len  int    // Length of encoding in bytes.
-	Args Args   // Instruction arguments, in ARM manual order.
+	Args Args   // Instruction arguments, in Power ISA manual order.
 }
 
 func (i Inst) String() string {
